@@ -6,8 +6,11 @@ import time
 import sqlite3
 import datetime
 import smtplib
+import os
+from dotenv import load_dotenv
 
 app = Flask(__name__)
+load_dotenv()
 
 pending_users = {}
 registered_users = {}
@@ -319,10 +322,11 @@ def goals():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+
 @app.route("/send-otp", methods=["POST"])
 def send_otp():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
 
         name = data.get("name", "").strip()
         email = data.get("email", "").strip().lower()
@@ -341,8 +345,15 @@ def send_otp():
 
         if len(password) < 6:
             return jsonify({"success": False, "message": "Password must be at least 6 characters."}), 400
-        print(email,reg)
-        if email in reg:
+
+        # Fresh DB check instead of old startup list
+        conn = sqlite3.connect("fintrackai.db")
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM USER WHERE LOWER(EMAIL) = ?", (email,))
+        existing_user = cur.fetchone()
+        conn.close()
+
+        if existing_user:
             return jsonify({"success": False, "message": "User already registered with this email."}), 400
 
         otp = generate_otp()
@@ -357,28 +368,33 @@ def send_otp():
             "expires_at": expires_at
         }
 
-        print("\n" + "=" * 60)
-        print(f"CORRECT OTP for {email}: {otp}")
-        print("=" * 60 + "\n")
-        sender_email = "inikolagpt@gmail.com"
-        app_password = "aosk uoaf ivax bkuz"
+        sender_email = os.getenv("sender_email")
+        app_password = os.getenv("app_password")
+        print(sender_email,app_password)
+
+        if not sender_email or not app_password:
+            return jsonify({
+                "success": False,
+                "message": "Mail configuration missing. Please set MAIL_EMAIL and MAIL_APP_PASSWORD."
+            }), 500
 
         subject = "OTP Verification"
         body = f"Your OTP is: {otp}"
         message = f"Subject: {subject}\nTo: {email}\nFrom: {sender_email}\n\n{body}"
 
-        server = smtplib.SMTP("smtp.gmail.com",587)
+        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=20)
         server.starttls()
-        server.login(sender_email,app_password)
-        server.sendmail(sender_email,email,message)
+        server.login(sender_email, app_password)
+        server.sendmail(sender_email, email, message)
         server.quit()
 
         return jsonify({
             "success": True,
-            "message": "OTP generated successfully. Please enter OTP."
+            "message": "OTP sent successfully. Please enter OTP."
         }), 200
 
     except Exception as e:
+        print("SEND OTP ERROR:", str(e))
         return jsonify({"success": False, "message": f"Error: {str(e)}"}), 500
 
 
