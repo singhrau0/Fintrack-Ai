@@ -386,7 +386,167 @@ def send_otp():
         print("SEND-OTP ERROR:", str(e))
         return jsonify({"message": f"Error: {str(e)}"}), 500
 
+@app.route("/analytics", methods=["GET"])
+def analytics():
+    return render_template("analytics.html")
 
+
+@app.route("/analytics-data", methods=["POST"])
+def analytics_data():
+    try:
+        data = request.get_json()
+        email = data.get("email", "").strip()
+
+        if not email:
+            return jsonify({
+                "success": False,
+                "error": "Email is required."
+            })
+
+        conn = sqlite3.connect('fintrackai.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        
+        # Get user id
+        cur.execute("SELECT USER_ID FROM USER WHERE EMAIL = ?", (email,))
+        user = cur.fetchone()
+      
+        if not user:
+            conn.close()
+            return jsonify({
+                "success": False,
+                "error": "No user found with this email."
+            })
+
+        user_id = user["USER_ID"]
+      
+
+        # Fetch latest income profile
+        cur.execute("""
+            SELECT *
+            FROM INCOMEPROFILE
+            WHERE USER_ID = ?
+            ORDER BY CREATED_AT DESC
+            LIMIT 1
+        """, (user_id,))
+        income_row = cur.fetchone()
+
+        if not income_row:
+            conn.close()
+            return jsonify({
+                "success": False,
+                "error": "Income profile not found for this user."
+            })
+
+        income_data = {
+            "monthly_income": float(income_row["MONTHLY_INCOME"] or 0),
+            "additional_monthly_income": float(income_row["ADDITIONAL_MONTHLY_INCOME"] or 0),
+            "dependants": int(income_row["DEPENDANTS"] or 0),
+            "income_type": income_row["INCOME_TYPE"],
+            "additional_income_type": income_row["ADDITIONAL_INCOME_TYPE"]
+        }
+     
+
+        # Fetch latest expense profile
+        cur.execute("""
+            SELECT *
+            FROM EXPENSEPROFILE
+            WHERE USER_ID = ?
+            ORDER BY CREATED_AT DESC
+            LIMIT 1
+        """, (user_id,))
+        expense_row = cur.fetchone()
+
+        if not expense_row:
+            conn.close()
+            return jsonify({
+                "success": False,
+                "error": "Expense profile not found for this user."
+            })
+
+        expense_data = {
+            "groceries": float(expense_row["GROCERIES"] or 0),
+            "travel": float(expense_row["TRAVEL"] or 0),
+            "medfit": float(expense_row["MEDFIT"] or 0),
+            "lep": float(expense_row["LEP"] or 0),
+            "monthly_rent": float(expense_row["MONTHLY_RENT"] or 0),
+            "m_bills": float(expense_row["M_BILLS"] or 0),
+            "fashion": float(expense_row["FASHION"] or 0),
+            "entertainment": float(expense_row["ENTERTAINMENT"] or 0),
+            "education": float(expense_row["EDUCATION"] or 0),
+            "emsaving": float(expense_row["EMSAVING"] or 0),
+            "miscellaneous": float(expense_row["MISCELLANEOUS"] or 0)
+        }
+       
+
+        total_income = (
+            income_data["monthly_income"] +
+            income_data["additional_monthly_income"]
+        )
+
+        total_expense = sum(expense_data.values())
+        free_cash = total_income - total_expense
+      
+        # Fetch goals
+        cur.execute(f'''
+            SELECT GOAL_NAME, GOAL_AMOUNT, MONTHLY_SAVING_T, GOAL_STATUS, START_DATE, END_DATE
+            FROM GOALS
+            WHERE USER_ID = {user_id}
+            ORDER BY CREATED_AT DESC
+        ''')
+        
+        goal_rows = cur.fetchall()
+        goals = []
+        total_goal_amount = 0.0
+        goal_summary = {
+            "ACTIVE": 0,
+            "PAUSED": 0,
+            "ACHIEVED": 0,
+            "EXPIRED": 0,
+            "INACTIVE": 0
+        }
+
+        for row in goal_rows:
+            row = dict(row)
+            goal_amount = float(row["GOAL_AMOUNT"] or 0)
+            total_goal_amount += goal_amount
+            
+
+            status = row["GOAL_STATUS"]
+            if status in goal_summary:
+                goal_summary[status] += 1
+      
+            
+
+            goals.append({
+                "goal_name": row["GOAL_NAME"],
+                "goal_amount": goal_amount,
+                "monthly_saving_t": float(row["MONTHLY_SAVING_T"] or 0),
+                "goal_status": status,
+                "start_date": row["START_DATE"],
+                "end_date": row["END_DATE"]
+            })
+        
+        conn.close()
+
+        return jsonify({
+            "success": True,
+            "income_data": income_data,
+            "expense_data": expense_data,
+            "goals": goals,
+            "goal_summary": goal_summary,
+            "total_income": round(total_income, 2),
+            "total_expense": round(total_expense, 2),
+            "free_cash": round(free_cash, 2),
+            "total_goal_amount": round(total_goal_amount, 2)
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+    
 @app.route("/verify-otp", methods=["POST"])
 def verify_otp():
     try:
@@ -461,4 +621,4 @@ def users():
 
 
 if __name__ == "__main__":
-    app.run(debug=True,host = "0.0.0.0",port = 5050)
+    app.run(debug=True,host = "0.0.0.0",port = 5500)
