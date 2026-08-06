@@ -1,624 +1,316 @@
-from flask import Flask, render_template, request, jsonify
-from werkzeug.security import generate_password_hash,check_password_hash
-from recommendation import target
-import random
-import time
+"""FinTrack AI FastAPI application."""
+
+from __future__ import annotations
+
 import sqlite3
-import datetime
-import smtplib
-import os
-
-app = Flask(__name__)
-
-pending_users = {}
-registered_users = {}
-conn = sqlite3.connect("fintrackai.db")
-cur = conn.cursor()
-cur.execute("select * from user")
-x = cur.fetchall()
-reg = []
-for i in x:
-    reg.append(i[3].lower())
-
-OTP_EXPIRY_SECONDS = 300  # 5 minutes
-
-
-def generate_otp():
-    return str(random.randint(1000, 9999))
-
-
-@app.route("/")
-def home():
-    return render_template("index.html")
-
-
-@app.route("/signup")
-def signup_page():
-    return render_template("signup.html")
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    error = None
-
-    if request.method == "POST":
-        user_email = request.form.get("email", "").strip()
-        user_password = request.form.get("password", "").strip()
-
-        # Check email first
-        conn = sqlite3.connect('fintrackai.db')
-        cur = conn.cursor()
-        cur.execute("SELECT EMAIL,PASSWORD_HASH FROM USER")
-        x = dict(cur.fetchall())
-
-        if user_email in x:
-            # Check hashed password
-            if check_password_hash(x[user_email], user_password):
-                return render_template("dashboard.html", user_email=user_email)
-            else:
-                error = "Invalid password."
-        else:
-            error = "Invalid email."
-
-    return render_template("login.html", error=error)
-
-@app.route("/income", methods=["GET", "POST"])
-def income():
-    if request.method == "GET":
-        return render_template("income.html")
-
-    email = request.form.get("email", "").strip()
-    income_type = request.form.get("income_type", "").strip()
-    monthly_income = request.form.get("monthly_income", "").strip()
-    additional_income_type = request.form.get("additional_income_type", "").strip()
-    additional_monthly_income = request.form.get("additional_monthly_income", "").strip()
-    dependants = request.form.get("dependants", "").strip()
-
-    conn = sqlite3.connect('fintrackai.db')
-    cur = conn.cursor()
-    cur.execute("SELECT EMAIL,PASSWORD_HASH FROM USER")
-    x = dict(cur.fetchall())
-
-    if email not in x:
-        return render_template("income.html", error="Email is required.")
-
-    try:
-
-        # Assumption: USER table contains EMAIL column
-        cur.execute("SELECT USER_ID FROM USER WHERE EMAIL = ?", (email,))
-        user_row = cur.fetchone()
-
-        if not user_row:
-            conn.close()
-            return render_template("income.html", error="No user found with this email.")
-
-        user_id = user_row[0]
-        now = datetime.datetime.now()
-        profile_id = cur.execute("SELECT max(PROFILE_ID) FROM INCOMEPROFILE")
-        x = cur.fetchall()
-        if x[0][0]==None:
-            x = 1
-        else:
-            x = x[0][0]+1
-
-        cur.execute("""
-            INSERT INTO INCOMEPROFILE (
-                PROFILE_ID,
-                USER_ID,
-                INCOME_TYPE,
-                MONTHLY_INCOME,
-                ADDITIONAL_INCOME_TYPE,
-                ADDITIONAL_MONTHLY_INCOME,
-                DEPENDANTS,
-                CREATED_AT,
-                UPDATED_AT
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            int(x),
-            int(user_id),
-            income_type,
-            float(monthly_income),
-            additional_income_type,
-            float(additional_monthly_income),
-            int(dependants),
-            now,
-            now
-        ))
-
-        conn.commit()
-        conn.close()
-
-        return render_template("income.html", success="Income profile saved successfully.")
-
-    except sqlite3.IntegrityError as e:
-        return render_template("income.html", error=f"Database integrity error: {str(e)}")
-
-    except Exception as e:
-        return render_template("income.html", error=f"Error: {str(e)}")
-    
-@app.route("/expense", methods=["GET", "POST"])
-def expense():
-    if request.method == "GET":
-        return render_template("expense.html")
-
-    email = request.form.get("email", "").strip()
-    groceries = request.form.get("groceries", "").strip()
-    travel = request.form.get("travel", "").strip()
-    medfit = request.form.get("medfit", "").strip()
-    lep = request.form.get("lep", "").strip()
-    monthly_rent = request.form.get("monthly_rent", "").strip()
-    m_bills = request.form.get("m_bills", "").strip()
-    fashion = request.form.get("fashion", "").strip()
-    entertainment = request.form.get("entertainment", "").strip()
-    education = request.form.get("education", "").strip()
-    emsaving = request.form.get("emsaving", "").strip()
-    miscellaneous = request.form.get("miscellaneous", "").strip()
-
-    if not email:
-        return render_template("expense.html", error="Email is required.")
-
-    try:
-        conn = sqlite3.connect("fintrackai.db")
-        cur = conn.cursor()
-
-        cur.execute("SELECT USER_ID FROM USER WHERE EMAIL = ?", (email,))
-        user_row = cur.fetchone()
-
-        if not user_row:
-            conn.close()
-            return render_template("expense.html", error="No user found with this email.")
-
-        user_id = user_row[0]
-        expense_id = cur.execute("SELECT max(expense_ID) FROM expensePROFILE")
-        x = cur.fetchall()
-        if x[0][0]==None:
-            x = 1
-        else:
-            x = x[0][0]+1
-
-        print(x,user_id,email,groceries,travel,medfit,lep,monthly_rent,m_bills,fashion,entertainment,education,emsaving,miscellaneous)
-        cur.execute("""
-            INSERT INTO EXPENSEPROFILE (
-                Expense_ID,
-                USER_ID,
-                GROCERIES,
-                TRAVEL,
-                MEDFIT,
-                LEP,
-                MONTHLY_RENT,
-                M_BILLS,
-                FASHION,
-                ENTERTAINMENT,
-                EDUCATION,
-                EMSAVING,
-                MISCELLANEOUS,
-                CREATED_AT
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)
-        """, (
-            x,
-            int(user_id),
-            float(groceries),
-            float(travel),
-            float(medfit),
-            float(lep),
-            float(monthly_rent),
-            float(m_bills),
-            float(fashion),
-            float(entertainment),
-            float(education),
-            float(emsaving),
-            float(miscellaneous),
-            datetime.datetime.now()
-        ))
-
-        conn.commit()
-        conn.close()
-
-        return render_template("expense.html", success="Expense profile saved successfully.")
-
-    except sqlite3.IntegrityError as e:
-        return render_template("expense.html", error=f"Database integrity error: {str(e)}")
-    except ValueError:
-        return render_template("expense.html", error="Please enter valid numeric values in all amount fields.")
-    except Exception as e:
-        return render_template("expense.html", error=f"Error: {str(e)}")
-    
-@app.route("/goals", methods=["GET", "POST"])
-def goals():
-    if request.method == "GET":
-        return render_template("goals.html")
-
-    try:
-        email = request.form.get("email", "").strip()
-        goal_name = request.form.get("goal_name", "").strip()
-        goal_amount = request.form.get("goal_amount", "").strip()
-        start_date = request.form.get("start_date", "").strip()
-        end_date = request.form.get("end_date", "").strip()
-        goal_status = request.form.get("goal_status", "").strip()
-
-        if not email or not goal_name or not goal_amount or not start_date or not end_date or not goal_status:
-            return jsonify({"success": False, "error": "All fields are required."})
-
-        goal_amount = float(goal_amount)
-
-
-
-        # Calculate duration in months
-       
-
-        ob = target(email)
-        res = ob.monthly_target(goal_amount)
-
-
-        monthly_target = res[0]
-        duration_in_month = res[1]
-
-        conn = sqlite3.connect("fintrackai.db")
-        cur = conn.cursor()
-
-        cur.execute("SELECT USER_ID FROM USER WHERE EMAIL = ?", (email,))
-        user = cur.fetchone()
-
-        if not user:
-            conn.close()
-            return jsonify({"success": False, "error": "User not found."})
-
-        user_id = user[0]
-
-        # Generate GOALID
-        goal_id = random.randint(10000, 99999)
-
-        # Optional: avoid duplicate GOALID
-        while True:
-            cur.execute("SELECT 1 FROM GOALS WHERE GOALID = ?", (goal_id,))
-            existing = cur.fetchone()
-            if not existing:
-                break
-            goal_id = random.randint(10000, 99999)
-
-        now = datetime.datetime.now()
-
-        cur.execute("""
-            INSERT INTO GOALS (
-                GOALID,
-                USER_ID,
-                GOAL_NAME,
-                START_DATE,
-                END_DATE,
-                GOAL_AMOUNT,
-                MONTHLY_SAVING_T,
-                GOAL_STATUS,
-                CREATED_AT,
-                UPDATED_AT
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            goal_id,
-            user_id,
-            goal_name,
-            start_date,
-            end_date,
-            goal_amount,
-            monthly_target,
-            goal_status,
-            now,
-            now
-        ))
-
-        conn.commit()
-        conn.close()
-
-        return jsonify({
-            "success": True,
-            "monthlytarget": monthly_target,
-            "durationinmonth": duration_in_month
-        })
-
-    except ValueError:
-        return jsonify({"success": False, "error": "Please enter valid numeric values and valid dates."})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
-
-@app.route("/send-otp", methods=["POST"])
-def send_otp():
-    try:
-        import requests as http_requests
-        import random, time
-
-        data = request.get_json()
-        name     = data.get("name", "").strip()
-        email    = data.get("email", "").strip()
-        gender   = data.get("gender")
-        password = data.get("password")
-
-        if not name or not email:
-            return jsonify({"message": "Name and email required"}), 400
-
-        otp = str(random.randint(1000, 9999))
-
-        pending_users[email] = {
-            "name": name,
-            "gender": gender,
-            "email": email,
-            "password": password,
-            "otp": otp,
-            "expires_at": time.time() + OTP_EXPIRY_SECONDS
-        }
-
-        api_key = os.environ.get("BREVO_API_KEY")
-        if not api_key:
-            return jsonify({"message": "Email service not configured"}), 500
-
-        response = http_requests.post(
-            "https://api.brevo.com/v3/smtp/email",
-            headers={
-                "api-key": api_key,
-                "Content-Type": "application/json"
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, Request, Security, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
+
+from db import database_health, initialize_database
+from errors import AppError
+from schemas import (
+    AnalyticsResponse,
+    AuthResponse,
+    ExpensePayload,
+    ExpenseResponse,
+    GoalHistoryPayload,
+    GoalHistoryResponse,
+    GoalPayload,
+    GoalResponse,
+    HealthResponse,
+    IncomePayload,
+    IncomeResponse,
+    LoginRequest,
+    MessageResponse,
+    RecommendationResponse,
+    SignupStartRequest,
+    SignupStartResponse,
+    SignupVerifyRequest,
+    UserResponse,
+)
+from services import analytics_service, auth_service, goal_service, profile_service
+from services.auth_service import AuthenticatedUser
+
+
+FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    initialize_database()
+    yield
+
+
+def create_app() -> FastAPI:
+    api = FastAPI(
+        title="FinTrack AI API",
+        version="2.0.0",
+        description="Authenticated financial-profile, goal, and analytics API.",
+        lifespan=lifespan,
+    )
+    bearer = HTTPBearer(auto_error=False)
+
+    @api.exception_handler(AppError)
+    async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": exc.code,
+                    "message": exc.message,
+                    "details": exc.details,
+                }
             },
-            json={
-                "sender": {"name": "FinTrack AI", "email": "kamalselva087@gmail.com"},
-                "to": [{"email": email, "name": name}],
-                "subject": "Your FinTrack AI OTP Code",
-                "htmlContent": f"""
-                    <div style="font-family:sans-serif;max-width:400px;margin:auto;padding:32px;
-                                background:#0a0820;color:#ede8ff;border-radius:16px;">
-                        <h2 style="color:#a78bfa">FinTrack AI</h2>
-                        <p>Hi <strong>{name}</strong>, your OTP verification code is:</p>
-                        <h1 style="font-size:3rem;letter-spacing:12px;color:#7c3aed;
-                                   text-align:center;padding:16px 0">{otp}</h1>
-                        <p style="color:#9d8ec4">This code expires in 5 minutes.<br/>
-                        If you did not request this, ignore this email.</p>
-                    </div>
-                """
-            },
-            timeout=10
         )
 
-        if response.status_code not in [200, 201]:
-            print("BREVO API ERROR:", response.text)
-            return jsonify({"message": "Failed to send OTP. Try again."}), 500
-
-        print("OTP EMAIL SENT SUCCESSFULLY via Brevo API")
-        return jsonify({"message": "OTP sent successfully"}), 200
-
-    except Exception as e:
-        print("SEND-OTP ERROR:", str(e))
-        return jsonify({"message": f"Error: {str(e)}"}), 500
-
-@app.route("/analytics", methods=["GET"])
-def analytics():
-    return render_template("analytics.html")
-
-
-@app.route("/analytics-data", methods=["POST"])
-def analytics_data():
-    try:
-        data = request.get_json()
-        email = data.get("email", "").strip()
-
-        if not email:
-            return jsonify({
-                "success": False,
-                "error": "Email is required."
-            })
-
-        conn = sqlite3.connect('fintrackai.db')
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        
-        # Get user id
-        cur.execute("SELECT USER_ID FROM USER WHERE EMAIL = ?", (email,))
-        user = cur.fetchone()
-      
-        if not user:
-            conn.close()
-            return jsonify({
-                "success": False,
-                "error": "No user found with this email."
-            })
-
-        user_id = user["USER_ID"]
-      
-
-        # Fetch latest income profile
-        cur.execute("""
-            SELECT *
-            FROM INCOMEPROFILE
-            WHERE USER_ID = ?
-            ORDER BY CREATED_AT DESC
-            LIMIT 1
-        """, (user_id,))
-        income_row = cur.fetchone()
-
-        if not income_row:
-            conn.close()
-            return jsonify({
-                "success": False,
-                "error": "Income profile not found for this user."
-            })
-
-        income_data = {
-            "monthly_income": float(income_row["MONTHLY_INCOME"] or 0),
-            "additional_monthly_income": float(income_row["ADDITIONAL_MONTHLY_INCOME"] or 0),
-            "dependants": int(income_row["DEPENDANTS"] or 0),
-            "income_type": income_row["INCOME_TYPE"],
-            "additional_income_type": income_row["ADDITIONAL_INCOME_TYPE"]
-        }
-     
-
-        # Fetch latest expense profile
-        cur.execute("""
-            SELECT *
-            FROM EXPENSEPROFILE
-            WHERE USER_ID = ?
-            ORDER BY CREATED_AT DESC
-            LIMIT 1
-        """, (user_id,))
-        expense_row = cur.fetchone()
-
-        if not expense_row:
-            conn.close()
-            return jsonify({
-                "success": False,
-                "error": "Expense profile not found for this user."
-            })
-
-        expense_data = {
-            "groceries": float(expense_row["GROCERIES"] or 0),
-            "travel": float(expense_row["TRAVEL"] or 0),
-            "medfit": float(expense_row["MEDFIT"] or 0),
-            "lep": float(expense_row["LEP"] or 0),
-            "monthly_rent": float(expense_row["MONTHLY_RENT"] or 0),
-            "m_bills": float(expense_row["M_BILLS"] or 0),
-            "fashion": float(expense_row["FASHION"] or 0),
-            "entertainment": float(expense_row["ENTERTAINMENT"] or 0),
-            "education": float(expense_row["EDUCATION"] or 0),
-            "emsaving": float(expense_row["EMSAVING"] or 0),
-            "miscellaneous": float(expense_row["MISCELLANEOUS"] or 0)
-        }
-       
-
-        total_income = (
-            income_data["monthly_income"] +
-            income_data["additional_monthly_income"]
+    @api.exception_handler(RequestValidationError)
+    async def validation_error_handler(
+        _request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        safe_errors = [
+            {
+                "location": [str(part) for part in error.get("loc", ())],
+                "message": error.get("msg", "Invalid value"),
+                "type": error.get("type", "validation_error"),
+            }
+            for error in exc.errors()
+        ]
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "validation_error",
+                    "message": "Please correct the highlighted input values.",
+                    "details": {"fields": safe_errors},
+                }
+            },
         )
 
-        total_expense = sum(expense_data.values())
-        free_cash = total_income - total_expense
-      
-        # Fetch goals
-        cur.execute(f'''
-            SELECT GOAL_NAME, GOAL_AMOUNT, MONTHLY_SAVING_T, GOAL_STATUS, START_DATE, END_DATE
-            FROM GOALS
-            WHERE USER_ID = {user_id}
-            ORDER BY CREATED_AT DESC
-        ''')
-        
-        goal_rows = cur.fetchall()
-        goals = []
-        total_goal_amount = 0.0
-        goal_summary = {
-            "ACTIVE": 0,
-            "PAUSED": 0,
-            "ACHIEVED": 0,
-            "EXPIRED": 0,
-            "INACTIVE": 0
+    @api.exception_handler(sqlite3.IntegrityError)
+    async def integrity_error_handler(
+        _request: Request, _exc: sqlite3.IntegrityError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": {
+                    "code": "data_conflict",
+                    "message": "The requested change conflicts with existing data.",
+                    "details": {},
+                }
+            },
+        )
+
+    @api.exception_handler(Exception)
+    async def unexpected_error_handler(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "internal_error",
+                    "message": "An unexpected server error occurred.",
+                    "details": {},
+                }
+            },
+        )
+
+    def current_user(
+        credentials: HTTPAuthorizationCredentials | None = Security(bearer),
+    ) -> AuthenticatedUser:
+        token = credentials.credentials if credentials else None
+        return auth_service.authenticate_token(token)
+
+    @api.get("/api/health", response_model=HealthResponse, tags=["system"])
+    def health() -> dict[str, str]:
+        healthy = database_health()
+        return {
+            "status": "ok" if healthy else "degraded",
+            "database": "connected" if healthy else "unavailable",
         }
 
-        for row in goal_rows:
-            row = dict(row)
-            goal_amount = float(row["GOAL_AMOUNT"] or 0)
-            total_goal_amount += goal_amount
-            
+    @api.post(
+        "/api/auth/signup/start",
+        response_model=SignupStartResponse,
+        status_code=status.HTTP_200_OK,
+        tags=["authentication"],
+    )
+    def signup_start(payload: SignupStartRequest):
+        return auth_service.start_signup(payload)
 
-            status = row["GOAL_STATUS"]
-            if status in goal_summary:
-                goal_summary[status] += 1
-      
-            
+    @api.post(
+        "/api/auth/signup/verify",
+        response_model=AuthResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["authentication"],
+    )
+    def signup_verify(payload: SignupVerifyRequest):
+        return auth_service.verify_signup(payload)
 
-            goals.append({
-                "goal_name": row["GOAL_NAME"],
-                "goal_amount": goal_amount,
-                "monthly_saving_t": float(row["MONTHLY_SAVING_T"] or 0),
-                "goal_status": status,
-                "start_date": row["START_DATE"],
-                "end_date": row["END_DATE"]
-            })
-        
-        conn.close()
+    @api.post(
+        "/api/auth/login",
+        response_model=AuthResponse,
+        tags=["authentication"],
+    )
+    def login(payload: LoginRequest):
+        return auth_service.login(payload)
 
-        return jsonify({
-            "success": True,
-            "income_data": income_data,
-            "expense_data": expense_data,
-            "goals": goals,
-            "goal_summary": goal_summary,
-            "total_income": round(total_income, 2),
-            "total_expense": round(total_expense, 2),
-            "free_cash": round(free_cash, 2),
-            "total_goal_amount": round(total_goal_amount, 2)
-        })
+    @api.get("/api/auth/me", response_model=UserResponse, tags=["authentication"])
+    def me(user: AuthenticatedUser = Depends(current_user)):
+        return user.as_dict()
 
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        })
-    
-@app.route("/verify-otp", methods=["POST"])
-def verify_otp():
-    try:
-        data = request.get_json()
+    @api.post(
+        "/api/auth/logout", response_model=MessageResponse, tags=["authentication"]
+    )
+    def logout(user: AuthenticatedUser = Depends(current_user)):
+        return auth_service.logout(user)
 
-        email = data.get("email", "").strip().lower()
-        otp = data.get("otp", "").strip()
+    @api.get("/api/income", response_model=list[IncomeResponse], tags=["income"])
+    def income_list(user: AuthenticatedUser = Depends(current_user)):
+        return profile_service.list_income(user.user_id)
 
-        if not email or not otp:
-            return jsonify({"success": False, "message": "Email and OTP are required."}), 400
+    @api.get(
+        "/api/income/latest", response_model=IncomeResponse, tags=["income"]
+    )
+    def income_latest(user: AuthenticatedUser = Depends(current_user)):
+        return profile_service.latest_income(user.user_id)
 
-        if email not in pending_users:
-            return jsonify({"success": False, "message": "No pending signup found for this email."}), 400
+    @api.post(
+        "/api/income",
+        response_model=IncomeResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["income"],
+    )
+    def income_create(
+        payload: IncomePayload, user: AuthenticatedUser = Depends(current_user)
+    ):
+        return profile_service.create_income(user.user_id, payload)
 
-        user_data = pending_users[email]
+    @api.put(
+        "/api/income/{profile_id}", response_model=IncomeResponse, tags=["income"]
+    )
+    def income_update(
+        profile_id: int,
+        payload: IncomePayload,
+        user: AuthenticatedUser = Depends(current_user),
+    ):
+        return profile_service.update_income(user.user_id, profile_id, payload)
 
-        if time.time() > user_data["expires_at"]:
-            del pending_users[email]
-            return jsonify({"success": False, "message": "OTP expired. Please sign up again."}), 400
+    @api.get(
+        "/api/expenses", response_model=list[ExpenseResponse], tags=["expenses"]
+    )
+    def expenses_list(user: AuthenticatedUser = Depends(current_user)):
+        return profile_service.list_expenses(user.user_id)
 
-        if otp != user_data["otp"]:
-            return jsonify({"success": False, "message": "Incorrect OTP. User not registered."}), 400
+    @api.get(
+        "/api/expenses/latest", response_model=ExpenseResponse, tags=["expenses"]
+    )
+    def expenses_latest(user: AuthenticatedUser = Depends(current_user)):
+        return profile_service.latest_expenses(user.user_id)
 
-        hashed_password = generate_password_hash(user_data["password"])
+    @api.post(
+        "/api/expenses",
+        response_model=ExpenseResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["expenses"],
+    )
+    def expenses_create(
+        payload: ExpensePayload, user: AuthenticatedUser = Depends(current_user)
+    ):
+        return profile_service.create_expenses(user.user_id, payload)
 
-        registered_users[email] = {
-            "name": user_data["name"],
-            "email": user_data["email"],
-            "gender": user_data["gender"],
-            "password": hashed_password,
-            "registered_at": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        print(registered_users)
-        conn = sqlite3.connect("fintrackai.db")
-        cur = conn.cursor()
-        cur.execute("select max(user_id) from user")
-        x1 = cur.fetchall()
-        cur.execute(f'''
-            INSERT INTO USER VALUES({x1[0][0]+1},"{registered_users[email]['name']}",
-            "{registered_users[email]['gender']}","{registered_users[email]['email']}",
-            "{registered_users[email]['password']}","{datetime.datetime.now()}")
-            ''')
-        conn.commit()
-        
-        print(pending_users)
-        cur.execute("select max(otp_id) from VERIFICATION")
-        x2 = cur.fetchall()
-        cur.execute(f'''
-            INSERT INTO VERIFICATION VALUES({x2[0][0]+1},{x1[0][0]+1},
-            {pending_users[email]['otp']},"{pending_users[email]['expires_at']}",
-            "{datetime.datetime.now()}","VERIFIED")
-            ''')
-        conn.commit()
+    @api.put(
+        "/api/expenses/{expense_id}",
+        response_model=ExpenseResponse,
+        tags=["expenses"],
+    )
+    def expenses_update(
+        expense_id: int,
+        payload: ExpensePayload,
+        user: AuthenticatedUser = Depends(current_user),
+    ):
+        return profile_service.update_expenses(user.user_id, expense_id, payload)
 
-        del pending_users[email]
+    @api.get("/api/goals", response_model=list[GoalResponse], tags=["goals"])
+    def goals_list(user: AuthenticatedUser = Depends(current_user)):
+        return goal_service.list_goals(user.user_id)
 
-        return jsonify({
-            "success": True,
-            "message": "User registered successfully."
-        }), 200
+    @api.post(
+        "/api/goals/recommendation",
+        response_model=RecommendationResponse,
+        tags=["goals"],
+    )
+    def goals_recommendation(
+        payload: GoalPayload, user: AuthenticatedUser = Depends(current_user)
+    ):
+        return goal_service.preview_recommendation(user.user_id, payload)
 
-    except Exception as e:
-        return jsonify({"success": False, "message": f"Error: {str(e)}"}), 500
+    @api.get("/api/goals/{goal_id}", response_model=GoalResponse, tags=["goals"])
+    def goals_get(goal_id: int, user: AuthenticatedUser = Depends(current_user)):
+        return goal_service.get_goal(user.user_id, goal_id)
+
+    @api.post(
+        "/api/goals",
+        response_model=GoalResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["goals"],
+    )
+    def goals_create(
+        payload: GoalPayload, user: AuthenticatedUser = Depends(current_user)
+    ):
+        return goal_service.create_goal(user.user_id, payload)
+
+    @api.put("/api/goals/{goal_id}", response_model=GoalResponse, tags=["goals"])
+    def goals_update(
+        goal_id: int,
+        payload: GoalPayload,
+        user: AuthenticatedUser = Depends(current_user),
+    ):
+        return goal_service.update_goal(user.user_id, goal_id, payload)
+
+    @api.get(
+        "/api/goals/{goal_id}/history",
+        response_model=list[GoalHistoryResponse],
+        tags=["goals"],
+    )
+    def goals_history_list(
+        goal_id: int, user: AuthenticatedUser = Depends(current_user)
+    ):
+        return goal_service.list_history(user.user_id, goal_id)
+
+    @api.post(
+        "/api/goals/{goal_id}/history",
+        response_model=GoalHistoryResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["goals"],
+    )
+    def goals_history_create(
+        goal_id: int,
+        payload: GoalHistoryPayload,
+        user: AuthenticatedUser = Depends(current_user),
+    ):
+        return goal_service.record_history(user.user_id, goal_id, payload)
+
+    @api.get(
+        "/api/analytics/summary",
+        response_model=AnalyticsResponse,
+        tags=["analytics"],
+    )
+    def analytics(user: AuthenticatedUser = Depends(current_user)):
+        return analytics_service.analytics_summary(user.user_id)
+
+    @api.get("/", include_in_schema=False, response_class=FileResponse)
+    def frontend():
+        return FileResponse(FRONTEND_DIR / "index.html")
+
+    api.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+
+    return api
 
 
-@app.route("/users", methods=["GET"])
-def users():
-    return jsonify({
-        "success": True,
-        "registered_users": registered_users
-    }), 200
-
-
-if __name__ == "__main__":
-    app.run(debug=True,host = "0.0.0.0",port = 5500)
+app = create_app()
